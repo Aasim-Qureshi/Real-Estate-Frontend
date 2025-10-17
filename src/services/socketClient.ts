@@ -6,8 +6,10 @@ class SocketClient {
   private statusCallbacks: ((data: any) => void)[] = [];
   private pauseResumeCallbacks: ((data: any) => void)[] = [];
 
+  
   connect() {
-    this.socket = io('http://localhost:5000');
+    const url = import.meta.env.VITE_SOCKET_URL;
+    this.socket = io(url);
 
     this.socket.on('connect', () => {
       console.log('Connected to server');
