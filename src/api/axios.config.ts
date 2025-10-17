@@ -1,8 +1,10 @@
 import axios from 'axios';
 
+const baseURL = import.meta.env.VITE_API_URL;
+
 // Create axios instance with base configuration
 const axiosInstance = axios.create({
-  baseURL: import.meta.env.API_URL,
+  baseURL: baseURL,
   timeout: 30000, // 30 seconds timeout for file uploads
   headers: {
     'Content-Type': 'application/json',
@@ -19,6 +21,7 @@ axiosInstance.interceptors.request.use(
     // }
     
     // For file uploads, remove Content-Type to let browser set it with boundary
+    console.log(import.meta.env.VITE_API_URL);
     if (config.data instanceof FormData) {
       delete config.headers['Content-Type'];
     }
