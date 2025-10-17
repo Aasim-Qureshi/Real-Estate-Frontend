@@ -34,6 +34,7 @@ export interface BatchStats {
   earliestUpload: string;
   submissionStatus: 'pending' | 'partial' | 'completed';
   submittedCount: number;
+   reportIds: string[]; // Add this
   percentage: number;
 }
 

@@ -29,13 +29,16 @@ class SocketClient {
       this.statusCallbacks.forEach(callback => callback(data));
     });
 
-    // Add pause/resume events
     this.socket.on('processing_paused', (data: any) => {
       this.pauseResumeCallbacks.forEach(callback => callback({ ...data, isPaused: true }));
     });
 
     this.socket.on('processing_resumed', (data: any) => {
       this.pauseResumeCallbacks.forEach(callback => callback({ ...data, isPaused: false }));
+    });
+
+    this.socket.on('processing_stopped', (data: any) => {
+      this.statusCallbacks.forEach(callback => callback(data));
     });
 
     return this.socket;
@@ -49,10 +52,16 @@ class SocketClient {
     this.socket?.emit('join_batch', batchId);
   }
 
-  startProcessing(batchId: string, reportIds: string[]) {
+  startProcessing(batchId: string, reportIds: string[], numTabs: number) {
+    // Validate numTabs
+    const validatedNumTabs = Math.max(1, Math.min(10, Math.floor(numTabs)));
+    
+    console.log(`Starting processing with ${validatedNumTabs} tabs for ${reportIds.length} reports`);
+    
     this.socket?.emit('start_taqeem_processing', {
       batchId,
       reportIds,
+      numTabs: validatedNumTabs,
       actionType: 'process'
     });
   }

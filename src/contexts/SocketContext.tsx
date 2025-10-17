@@ -4,7 +4,7 @@ import socketClient from '../services/socketClient';
 interface SocketContextType {
   isConnected: boolean;
   progressData: any | null;
-  startProcessing: (batchId: string, reportIds: string[]) => void;
+  startProcessing: (batchId: string, reportIds: string[], numTabs?: number) => void;
   pauseProcessing: (batchId: string) => void;
   resumeProcessing: (batchId: string) => void;
   stopProcessing: (batchId: string) => void;
@@ -54,9 +54,13 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     });
 
     socket.on('batch_status_update', (data) => {
-      console.log('Batch status update:', data);
-      setProgressData(data);
+      // prevent setting identical object
+      setProgressData((prev: any) => {
+        if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+        return data;
+      });
     });
+
 
     socket.on('processing_started', (data) => {
       console.log('Processing started:', data);
@@ -95,9 +99,9 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, []); // Only run once on mount
 
-  const startProcessing = (batchId: string, reportIds: string[]) => {
-    console.log('Starting processing for batch:', batchId, 'with', reportIds.length, 'reports');
-    socketClient.startProcessing(batchId, reportIds);
+  const startProcessing = (batchId: string, reportIds: string[], numTabs: number = 1) => {
+    console.log('Starting processing for batch:', batchId, 'with', reportIds.length, 'reports using', numTabs, 'tabs');
+    socketClient.startProcessing(batchId, reportIds, numTabs);
   };
 
   const pauseProcessing = (batchId: string) => {

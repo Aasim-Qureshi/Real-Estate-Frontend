@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { getBatchStats, getReportsByBatch } from '../api/getReports';
 import { type BatchStats, type Report, type PaginatedReportsResponse } from '../types/reports';
 import BatchCard from '../components/BatchCard';
@@ -20,17 +20,16 @@ const ViewReports: React.FC = () => {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showGetReportsButton, setShowGetReportsButton] = useState(true);
+  const [hasHandledCompletion, setHasHandledCompletion] = useState(false);
 
   const { progressData, isConnected } = useSocket();
   const { updateProgress, startProgress, completeProgress, setError: setProgressError } = useProgress();
 
-  // Check authentication status on component mount
   useEffect(() => {
     checkAuthStatus();
   }, []);
 
-  // Refetch batch stats when progress completes
-  const refetchBatchStats = async () => {
+  const refetchBatchStats = useCallback(async () => {
     try {
       console.log('Refetching batch stats after completion...');
       const batchData = await getBatchStats();
@@ -39,54 +38,97 @@ const ViewReports: React.FC = () => {
     } catch (err: any) {
       console.error('Failed to refetch batch stats:', err.message);
     }
-  };
+  }, []);
 
-  // Listen for socket progress updates
-  useEffect(() => {
-    if (progressData) {
-      console.log('Progress update received:', progressData);
-      
-      // Handle different progress types
-      switch (progressData.status) {
-        case 'STARTED':
-        case 'PROCESSING_STARTED':
-          startProgress(progressData.batchId, progressData.totalReports || progressData.total);
-          break;
-        case 'PROCESSING':
-        case 'RECORD_STARTED':
-        case 'STEP_STARTED':
-        case 'STEP_COMPLETED':
-        case 'RECORD_COMPLETED':
-          updateProgress(progressData);
-          break;
-        case 'COMPLETED':
-        case 'BATCH_COMPLETED':
-        case 'PROCESSING_COMPLETE':
-          completeProgress();
-          // Refetch batch stats when processing completes
-          refetchBatchStats();
-          break;
-        case 'FAILED':
-        case 'ERROR':
-        case 'PROCESSING_ERROR':
-          setProgressError(progressData.error || 'Processing failed');
-          break;
-        case 'PAUSED':
-          updateProgress({ ...progressData, isPaused: true });
-          break;
-        case 'RESUMED':
-          updateProgress({ ...progressData, isPaused: false });
-          break;
-        case 'STOPPED':
-          updateProgress({ ...progressData, isProcessing: false, status: 'STOPPED' });
-          break;
-        default:
-          updateProgress(progressData);
-      }
+  const resetBatchData = useCallback(() => {
+    console.log('Resetting batch reports and selected batch');
+    setBatchReports({});
+    setSelectedBatch(null);
+  }, []);
+
+  const handleCompletion = useCallback(async () => {
+    if (hasHandledCompletion) {
+      console.log('Completion already handled, skipping');
+      return;
     }
-  }, [progressData, startProgress, updateProgress, completeProgress, setProgressError]);
+    
+    setHasHandledCompletion(true);
+    completeProgress();
+    await refetchBatchStats();
+    resetBatchData();
+    
+    // Reset flag after a delay
+    setTimeout(() => {
+      setHasHandledCompletion(false);
+    }, 2000);
+  }, [hasHandledCompletion, completeProgress, refetchBatchStats, resetBatchData]);
 
-  // Check authentication status
+  useEffect(() => {
+    if (!progressData) return;
+
+    console.log('Progress update received:', progressData);
+    
+    switch (progressData.status) {
+      case 'STARTED':
+      case 'PROCESSING_STARTED':
+        setHasHandledCompletion(false); // Reset completion flag
+        startProgress(
+          progressData.batchId, 
+          progressData.totalReports || progressData.total,
+          progressData.numTabs || 1
+        );
+        break;
+      
+      case 'DATA_FETCHED':
+        updateProgress({
+          ...progressData,
+          message: `Using ${progressData.numTabs || 1} tabs for ${progressData.total} reports`
+        });
+        break;
+      
+      case 'TAB_STARTED':
+      case 'TAB_COMPLETED':
+      case 'TAB_FAILED':
+      case 'PROCESSING':
+      case 'RECORD_STARTED':
+      case 'STEP_STARTED':
+      case 'STEP_COMPLETED':
+      case 'RECORD_COMPLETED':
+      case 'RECORD_SUCCESS':
+        updateProgress(progressData);
+        break;
+      
+      case 'COMPLETED':
+      case 'BATCH_COMPLETED':
+      case 'PROCESSING_COMPLETE':
+        handleCompletion();
+        break;
+      
+      case 'FAILED':
+      case 'ERROR':
+      case 'PROCESSING_ERROR':
+        setProgressError(progressData.error || 'Processing failed');
+        setHasHandledCompletion(false);
+        break;
+      
+      case 'PAUSED':
+        updateProgress({ ...progressData, isPaused: true });
+        break;
+      
+      case 'RESUMED':
+        updateProgress({ ...progressData, isPaused: false });
+        break;
+      
+      case 'STOPPED':
+        updateProgress({ ...progressData, isProcessing: false, status: 'STOPPED' });
+        setHasHandledCompletion(false);
+        break;
+      
+      default:
+        updateProgress(progressData);
+    }
+  }, [progressData]);
+
   const checkAuthStatus = async () => {
     try {
       const status = await getTaqeemAuthStatus();
@@ -98,12 +140,12 @@ const ViewReports: React.FC = () => {
     }
   };
 
-  // Fetch batch statistics when button is clicked
   const handleGetReports = async () => {
     try {
       setLoading(true);
       setShowGetReportsButton(false);
       setError(null);
+      setHasHandledCompletion(false);
       
       const batchData = await getBatchStats();
       setBatches(batchData);
@@ -116,21 +158,17 @@ const ViewReports: React.FC = () => {
     }
   };
 
-  // Fetch reports when a batch is expanded (NOT for socket connection)
   const handleBatchToggle = async (batchId: string) => {
-    // Just toggle the view
     if (selectedBatch === batchId) {
       setSelectedBatch(null);
       return;
     }
 
-    // If we already have the reports, just show them
     if (batchReports[batchId]) {
       setSelectedBatch(batchId);
       return;
     }
 
-    // Fetch reports only if we don't have them yet
     try {
       setReportsLoading(batchId);
       setSelectedBatch(batchId);
@@ -157,7 +195,6 @@ const ViewReports: React.FC = () => {
     console.log('Login successful - submit buttons enabled');
   };
 
-  // Show loading skeleton when loading
   if (loading) {
     return (
       <div className="p-8">
@@ -199,6 +236,8 @@ const ViewReports: React.FC = () => {
 
   return (
     <div className="p-8">
+      {/* Global Progress Bar */}
+
       {/* Header */}
       <div className="mb-8 flex justify-between items-center">
         <div>
@@ -244,7 +283,9 @@ const ViewReports: React.FC = () => {
         </div>
       </div>
 
-      {/* Get All Reports Button (shown initially) */}
+      {/* Tab Progress Monitor - Shows when processing with multiple tabs */}
+
+      {/* Get All Reports Button */}
       {showGetReportsButton && (
         <div className="flex flex-col items-center justify-center py-20">
           <div className="text-center max-w-md mx-auto">

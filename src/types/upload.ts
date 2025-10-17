@@ -17,6 +17,40 @@ export interface UploadBlockProps {
   disabled?: boolean;
 }
 
+// types/upload.ts - Add validation types
+export interface ValidationError {
+  rowNumber: number;
+  field: string;
+  message: string;
+  type: 'empty' | 'integer' | 'date' | 'format' | 'system';
+  critical?: boolean;
+}
+
+export interface ValidationWarning {
+  rowNumber: number;
+  field: string;
+  message: string;
+}
+
+export interface ValidationResult {
+  success: boolean;
+  isValid: boolean;
+  correctedFile?: {
+    fileName: string;
+    downloadUrl: string;
+  };
+  summary: {
+    totalRows: number;
+    errorCount: number;
+    warningCount: number;
+  };
+  errors: ValidationError[];
+  warnings: ValidationWarning[];
+  pdfStats?: {
+    totalPdfs: number;
+  };
+}
+
 export interface ExcelExtractResponse {
   success: boolean;
   message: string;

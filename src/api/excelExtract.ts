@@ -1,10 +1,5 @@
 import axiosInstance from './axios.config';
-import { type UploadedFile, type ExcelExtractResponse, type UploadResult, type UploadProgressCallback } from '../types/upload';
-
-/**
- * Upload progress callback type
- */
-
+import { type UploadedFile, type ExcelExtractResponse, type UploadResult, type UploadProgressCallback, type ValidationResult } from '../types/upload';
 
 /**
  * Uploads Excel and PDF files to the extraction endpoint using Axios
@@ -13,7 +8,6 @@ import { type UploadedFile, type ExcelExtractResponse, type UploadResult, type U
  * @param onProgress - Optional progress callback
  * @returns Promise with upload result
  */
-
 export const uploadForExtraction = async (
   excelFile: File,
   pdfFiles: File[] = [],
@@ -111,5 +105,81 @@ export const checkServerHealth = async (): Promise<boolean> => {
   } catch (error) {
     console.error('Server health check failed:', error);
     return false;
+  }
+};
+
+/**
+ * Validate Excel files before upload
+ */
+export const validateExcelFiles = async (
+  excelFiles: UploadedFile[], 
+  pdfFiles: UploadedFile[]
+): Promise<ValidationResult> => {
+  try {
+    const formData = new FormData();
+
+    // Add Excel file
+    if (excelFiles.length > 0) {
+      formData.append('excelFile', excelFiles[0].file);
+    }
+
+    // Add PDF files
+    pdfFiles.forEach(pdfFile => {
+      formData.append('pdfFiles', pdfFile.file);
+    });
+
+    // Use axiosInstance for consistent API calls
+    const response = await axiosInstance.post<ValidationResult>('/validate/validate-excel', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+
+    return response.data;
+  } catch (error: any) {
+    console.error('Validation API error:', error);
+    
+    // Extract error message from axios error
+    let errorMessage = 'Validation failed: Unknown error occurred';
+    
+    if (error.response) {
+      errorMessage = error.response.data?.message || error.response.data?.error || `Validation failed: ${error.response.status}`;
+    } else if (error.request) {
+      errorMessage = 'Validation failed: Network error - Could not connect to server';
+    } else {
+      errorMessage = `Validation failed: ${error.message}`;
+    }
+    
+    // Return a validation result indicating failure
+    return {
+      success: false,
+      isValid: false,
+      summary: {
+        totalRows: 0,
+        errorCount: 1,
+        warningCount: 0
+      },
+      errors: [{
+        rowNumber: 0,
+        field: 'system',
+        message: errorMessage,
+        type: 'system',
+        critical: true
+      }],
+      warnings: []
+    };
+  }
+};
+
+export const downloadCorrectedFile = async (fileName: string): Promise<Blob> => {
+  try {
+    const response = await axiosInstance.get(`/validate/download-corrected/${fileName}`, {
+      responseType: 'blob'
+    });
+    
+    return response.data;
+  } catch (error: any) {
+    console.error('Download error:', error);
+    throw new Error('Failed to download corrected file');
   }
 };

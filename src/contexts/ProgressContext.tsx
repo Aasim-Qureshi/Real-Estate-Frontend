@@ -1,6 +1,15 @@
-// In your ProgressContext.tsx
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import socketClient from '../services/socketClient'; // Import your socket client
+import React, { createContext, useContext, useState, type ReactNode, useCallback } from 'react';
+
+interface TabProgress {
+  tabId: number;
+  status: string;
+  message: string;
+  current?: number;
+  total?: number;
+  step?: number;
+  isMainTab?: boolean;
+  percentage?: number;
+}
 
 interface ProgressState {
   batchId: string | null;
@@ -9,152 +18,166 @@ interface ProgressState {
   current: number;
   total: number;
   percentage: number;
-  status: string;
   message: string;
+  status: string;
+  numTabs?: number;
+  tabProgresses: Record<number, TabProgress>;
   error: string | null;
 }
 
 interface ProgressContextType {
   progress: ProgressState;
-  startProgress: (batchId: string, total: number) => void;
+  startProgress: (batchId: string, total: number, numTabs?: number) => void;
   updateProgress: (data: any) => void;
-  pauseProgress: () => void;
-  resumeProgress: () => void;
-  stopProgress: () => void;
   completeProgress: () => void;
   setError: (error: string) => void;
+  resetProgress: () => void;
 }
+
+const initialState: ProgressState = {
+  batchId: null,
+  isProcessing: false,
+  isPaused: false,
+  current: 0,
+  total: 0,
+  percentage: 0,
+  message: '',
+  status: '',
+  numTabs: 1,
+  tabProgresses: {},
+  error: null
+};
 
 const ProgressContext = createContext<ProgressContextType | undefined>(undefined);
 
 export const useProgress = () => {
   const context = useContext(ProgressContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useProgress must be used within a ProgressProvider');
   }
   return context;
 };
 
 interface ProgressProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export const ProgressProvider: React.FC<ProgressProviderProps> = ({ children }) => {
-  const [progress, setProgress] = useState<ProgressState>({
-    batchId: null,
-    isProcessing: false,
-    isPaused: false,
-    current: 0,
-    total: 0,
-    percentage: 0,
-    status: 'IDLE',
-    message: '',
-    error: null,
-  });
+  const [progress, setProgress] = useState<ProgressState>(initialState);
 
-  // Listen for pause/resume events from socket
-  React.useEffect(() => {
-    const handlePauseResume = (data: any) => {
-      setProgress(prev => ({
-        ...prev,
-        isPaused: data.isPaused,
-        status: data.isPaused ? 'PAUSED' : 'PROCESSING',
-        message: data.isPaused ? 'Processing paused' : 'Processing resumed'
-      }));
-    };
-
-    socketClient.onPauseResume(handlePauseResume);
-
-    return () => {
-      // Cleanup if needed
-    };
+  // Helper function to calculate percentage
+  const calculatePercentage = useCallback((current: number, total: number): number => {
+    if (total <= 0) return 0;
+    return Math.round((current / total) * 100);
   }, []);
 
-  const startProgress = useCallback((batchId: string, total: number) => {
+  const startProgress = (batchId: string, total: number, numTabs: number = 1) => {
+    console.log(`Starting progress tracking for batch ${batchId} with ${total} items using ${numTabs} tabs`);
     setProgress({
+      ...initialState,
       batchId,
       isProcessing: true,
-      isPaused: false,
-      current: 0,
       total,
+      numTabs,
       percentage: 0,
-      status: 'STARTED',
-      message: 'Starting processing...',
-      error: null,
+      message: `Starting processing with ${numTabs} tab${numTabs > 1 ? 's' : ''}...`
     });
-  }, []);
+  };
 
-  const updateProgress = useCallback((data: any) => {
-    setProgress(prev => ({
-      ...prev,
-      current: data.current || prev.current,
-      total: data.total || prev.total,
-      percentage: data.percentage !== undefined ? data.percentage : prev.percentage,
-      status: data.status || prev.status,
+const updateProgress = (data: any) => {
+  setProgress(prev => {
+    // Calculate percentage based on current progress
+    const current = data.current ?? prev.current;
+    const total = data.total ?? prev.total;
+    const calculatedPercentage = calculatePercentage(current, total);
+
+    // More comprehensive equality check
+    const isSameStatus = data.status === prev.status;
+    const isSameCurrent = current === prev.current;
+    const isSameTotal = total === prev.total;
+    const isSamePercentage = calculatedPercentage === prev.percentage;
+    const isSameMessage = data.message === prev.message;
+    const isSameBatchId = data.batchId === prev.batchId;
+
+    if (isSameStatus && isSameCurrent && isSameTotal && 
+        isSamePercentage && isSameMessage && isSameBatchId) {
+      return prev;
+    }
+
+    const updates: Partial<ProgressState> = {
+      batchId: data.batchId || prev.batchId,
       message: data.message || prev.message,
-      error: data.error || prev.error,
-    }));
-  }, []);
+      status: data.status || prev.status,
+      current,
+      total,
+      percentage: calculatedPercentage,
+      numTabs: data.numTabs ?? prev.numTabs,
+      isPaused: data.isPaused ?? prev.isPaused,
+      isProcessing: data.isProcessing ?? prev.isProcessing,
+    };
 
-  const pauseProgress = useCallback(() => {
-    setProgress(prev => ({
-      ...prev,
-      isPaused: true,
-      status: 'PAUSED',
-      message: 'Processing paused',
-    }));
-  }, []);
+    // Remove tab-specific progress handling since we're only tracking main tab
+    // Keep tabProgresses as empty object
 
-  const resumeProgress = useCallback(() => {
-    setProgress(prev => ({
-      ...prev,
-      isPaused: false,
-      status: 'PROCESSING',
-      message: 'Processing resumed',
-    }));
-  }, []);
+    // Handle completion
+    if (data.status === 'COMPLETED' || data.status === 'BATCH_COMPLETED') {
+      updates.isProcessing = false;
+      updates.isPaused = false;
+      updates.percentage = 100;
+      updates.current = total;
+      updates.message = data.message || 'Processing completed';
+      updates.status = 'COMPLETED';
+    }
 
-  const stopProgress = useCallback(() => {
+    // Handle errors
+    if (data.status === 'FAILED' || data.status === 'ERROR') {
+      updates.isProcessing = false;
+      updates.isPaused = false;
+      updates.error = data.message || data.error || 'An error occurred';
+      updates.status = 'FAILED';
+    }
+
+    return { ...prev, ...updates };
+  });
+};
+
+  const completeProgress = () => {
+    console.log('Progress completed');
     setProgress(prev => ({
       ...prev,
       isProcessing: false,
       isPaused: false,
-      status: 'STOPPED',
-      message: 'Processing stopped',
-    }));
-  }, []);
-
-  const completeProgress = useCallback(() => {
-    setProgress(prev => ({
-      ...prev,
-      isProcessing: false,
-      isPaused: false,
-      current: prev.total,
       percentage: 100,
-      status: 'COMPLETED',
-      message: 'Processing completed successfully',
+      current: prev.total,
+      message: 'Processing completed',
+      status: 'COMPLETED'
     }));
-  }, []);
+  };
 
-  const setError = useCallback((error: string) => {
+  const setError = (error: string) => {
+    console.error('Progress error:', error);
     setProgress(prev => ({
       ...prev,
       isProcessing: false,
-      status: 'ERROR',
-      message: 'Processing failed',
+      isPaused: false,
       error,
+      message: error,
+      status: 'FAILED'
     }));
-  }, []);
+  };
+
+  const resetProgress = () => {
+    console.log('Resetting progress');
+    setProgress(initialState);
+  };
 
   const value: ProgressContextType = {
     progress,
     startProgress,
     updateProgress,
-    pauseProgress,
-    resumeProgress,
-    stopProgress,
     completeProgress,
     setError,
+    resetProgress
   };
 
   return (
